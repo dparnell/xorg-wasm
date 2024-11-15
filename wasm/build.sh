@@ -3,6 +3,18 @@
 set -e
 set -x
 
+if [[ ! -e /opt/.inside-build-docker ]] ; then
+	IMAGE_NAME=xorg-wasm-build
+	if [[ "$(docker images -q $IMAGE_NAME 2> /dev/null)" == "" ]]; then
+		docker build -t $IMAGE_NAME - < Dockerfile.build
+	fi
+
+	docker run --rm -it -v $(realpath ..):/src --user $(id -u):$(id -g) $IMAGE_NAME /src/wasm/build.sh
+	exit 0
+else
+	cd /src/wasm
+fi
+
 #define basic paths and variables
 CORE_COUNT="$(nproc --all)"
 BASE_PATH="$(realpath .)"

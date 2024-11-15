@@ -1,0 +1,6 @@
+from debian:12.8
+
+RUN apt-get update && apt-get install -y bash wget cmake build-essential automake autoconf git libtool xutils-dev xorg-dev python3 python3-pip python3-setuptools python3-wheel ninja-build xfonts-utils
+RUN pip3 install --break-system-packages meson
+RUN mkdir -p /opt && touch /opt/.inside-build-docker
+
