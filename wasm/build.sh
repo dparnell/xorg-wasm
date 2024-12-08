@@ -9,7 +9,7 @@ if [[ ! -e /opt/.inside-build-docker ]] ; then
 		docker build -t $IMAGE_NAME - < Dockerfile.build
 	fi
 
-	docker run --rm -it -v $(realpath ..):/src --user $(id -u):$(id -g) $IMAGE_NAME /src/wasm/build.sh
+	docker run --rm -it -v $(realpath ..):/src --user $(id -u):$(id -g) $IMAGE_NAME /src/wasm/build.sh $*
 	exit 0
 else
 	cd /src/wasm
@@ -22,6 +22,7 @@ SRC_PATH="$(realpath ..)"
 DEPS_PATH="$BASE_PATH/deps"
 PREFIX_PATH="$BASE_PATH/prefix"
 BUILD_PATH="$BASE_PATH/build"
+WEB_PATH="$BASE_PATH/web"
 EMSDK_PATH="$BASE_PATH/emsdk"
 
 #dependency paths
@@ -169,6 +170,51 @@ build_libsha1() {
   emmake make install
 }
 
+build_all_deps() {
+  if [ ! -f "$PREFIX_PATH/include/X11/XF86keysym.h" ]; then
+    download_x11proto
+  fi
+  if [ ! -d "$PREFIX_PATH/share/xcb/" ]; then
+    download_xkbproto
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libXau.a" ]; then
+    build_libxau
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libxcb-xkb.a" ]; then
+    build_libxkb
+  fi
+  if [ ! -f "$PREFIX_PATH/include/X11/Xtrans/Xtrans.c" ]; then
+    build_libxtrans
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libX11.a" ]; then
+    build_libx11
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libpixman-1.a" ]; then
+    build_pixman
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libxkbfile.a" ]; then
+    build_libxkbfile
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libz.a" ]; then
+    build_zlib
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libfreetype.a" ]; then
+    build_freetype
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libfontenc.a" ]; then
+    build_libfontenc
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libXfont2.a" ]; then
+    build_libxfont
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libxcvt.a" ]; then
+    build_libxcvt
+  fi
+  if [ ! -f "$PREFIX_PATH/lib/libsha1.a" ]; then
+    build_libsha1
+  fi
+}
+
 #create build dirs
 mkdir -p "$BUILD_PATH"
 mkdir -p "$DEPS_PATH"
@@ -184,72 +230,54 @@ if [ ! -d "$EMSDK_PATH" ]; then
 fi
 source "$EMSDK_PATH/emsdk_env.sh"
 
-#setup meson
-cp "$BASE_PATH/wasm.cross" "$BUILD_PATH/wasm.cross"
-cross_file="$(cat "$BUILD_PATH/wasm.cross")"
-cross_file="${cross_file//__PREFIX_DIR_HERE__/$PREFIX_PATH}"
-echo "$cross_file" > "$BUILD_PATH/wasm.cross"
-
-#build all deps
-if [ ! -f "$PREFIX_PATH/include/X11/XF86keysym.h" ]; then
-  download_x11proto
-fi
-if [ ! -d "$PREFIX_PATH/share/xcb/" ]; then
-  download_xkbproto
-fi
-if [ ! -f "$PREFIX_PATH/lib/libXau.a" ]; then
-  build_libxau
-fi
-if [ ! -f "$PREFIX_PATH/lib/libxcb-xkb.a" ]; then
-  build_libxkb
-fi
-if [ ! -f "$PREFIX_PATH/include/X11/Xtrans/Xtrans.c" ]; then
-  build_libxtrans
-fi
-if [ ! -f "$PREFIX_PATH/lib/libX11.a" ]; then
-  build_libx11
-fi
-if [ ! -f "$PREFIX_PATH/lib/libpixman-1.a" ]; then
-  build_pixman
-fi
-if [ ! -f "$PREFIX_PATH/lib/libxkbfile.a" ]; then
-  build_libxkbfile
-fi
-if [ ! -f "$PREFIX_PATH/lib/libz.a" ]; then
-  build_zlib
-fi
-if [ ! -f "$PREFIX_PATH/lib/libfreetype.a" ]; then
-  build_freetype
-fi
-if [ ! -f "$PREFIX_PATH/lib/libfontenc.a" ]; then
-  build_libfontenc
-fi
-if [ ! -f "$PREFIX_PATH/lib/libXfont2.a" ]; then
-  build_libxfont
-fi
-if [ ! -f "$PREFIX_PATH/lib/libxcvt.a" ]; then
-  build_libxcvt
-fi
-if [ ! -f "$PREFIX_PATH/lib/libsha1.a" ]; then
-  build_libsha1
-fi
-
 #setup xserver build
 cd "$SRC_PATH"
-meson setup "$BUILD_PATH" --cross-file "$BUILD_PATH/wasm.cross" \
-  --default-library static \
-  -Dudev=false \
-  -Dudev_kms=false \
-  -Dsha1=libsha1 \
-  -Dxdmcp=false \
-  -Dglx=false \
-  -Dglamor=false \
-  -Dpciaccess=false \
-  -Dmitshm=false \
-  -Dxvfb=false \
-  -Dxorg=false \
-  -Dxwasm=true 
-  
-#run the compile!
-cd "$BUILD_PATH"
-meson compile
+
+if [ "$1" = "setup" ]; then
+  #setup meson
+  cp "$BASE_PATH/wasm.cross" "$BUILD_PATH/wasm.cross"
+  cross_file="$(cat "$BUILD_PATH/wasm.cross")"
+  cross_file="${cross_file//__PREFIX_DIR_HERE__/$PREFIX_PATH}"
+  echo "$cross_file" > "$BUILD_PATH/wasm.cross"
+
+  #setup clangd config
+  CLANGD_CONFIG="CompileFlags:
+  CompilationDatabase: wasm/build
+  Remove: -sUSE_SDL=2
+  Add: [--sysroot=${BASE_PATH}/emsdk/upstream/emscripten/cache/sysroot, -D__EMSCRIPTEN__]" 
+  echo "$CLANGD_CONFIG" > $SRC_PATH/.clangd
+
+  build_all_deps
+
+  mkdir -p "$BUILD_PATH"
+  meson setup "$BUILD_PATH" --cross-file "$BUILD_PATH/wasm.cross" \
+    --default-library static \
+    -Dudev=false \
+    -Dudev_kms=false \
+    -Dsha1=libsha1 \
+    -Dxdmcp=false \
+    -Dglx=false \
+    -Dglamor=false \
+    -Dpciaccess=false \
+    -Dmitshm=false \
+    -Dxvfb=false \
+    -Dxorg=false \
+    -Dlisten_tcp=true \
+    -Dipv6=false \
+    -Dxwasm=true \
+    -Ddebug=true \
+    -Doptimization=g
+
+else
+  #run the compile!
+  cd "$BUILD_PATH"
+  meson compile
+
+  rm -rf "$WEB_PATH/out"
+  mkdir -p "$WEB_PATH/out"
+  cp "$BUILD_PATH/hw/kdrive/xwasm/xwasm.js" "$WEB_PATH/out"
+  cp "$BUILD_PATH/hw/kdrive/xwasm/xwasm.wasm" "$WEB_PATH/out"
+
+  python3 "$BASE_PATH/patch_js.py" "$BASE_PATH/fragments" "$WEB_PATH/out/xwasm.js"
+fi
+
